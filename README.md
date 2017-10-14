@@ -21,16 +21,13 @@ CUDA Rasterizer
 ![Cow with Lambert Shadings] (/renders/Cow.gif)
   <p align="center"><b>Cow with Lambert Shadings</b></p>
   
-![Cow with Lambert Shadings] (/renders/Cow.gif)
-  <p align="center"><b>Cow with Lambert Shadings</b></p>
-  
 ![Double Cylinder Engine with Lamber Shadings](/renders/Engine.gif)
   <p align="center"><b>Double Cylinder Engine with Lamber Shadings</b></p>
   
 ![Double Cylinder Engine Scaled with 0.01](/renders/Engine001.gif)
   <p align="center"><b>Double Cylinder Engine Scaled with 0.01</b></p>
   
-![Character Model with Lambert Shadings](/renders/Engine001.gif)
+![Character Model with Lambert Shadings](/renders/Di.gif)
   <p align="center"><b>Character Model with Lambert Shadings</b></p>
   
 ## Interpolate Fragment Colors Within Triangle
