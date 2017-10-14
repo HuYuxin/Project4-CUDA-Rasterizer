@@ -99,3 +99,17 @@ float getZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3])
            + barycentricCoord.y * tri[1].z
            + barycentricCoord.z * tri[2].z);
 }
+
+__host__ __device__ static
+glm::vec3 getColorAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 color[3]) {
+	return (barycentricCoord.x * color[0]
+		+ barycentricCoord.y * color[1]
+		+ barycentricCoord.z * color[2]);
+}
+
+__host__ __device__ static
+glm::vec2 getTextureAtCoord(const glm::vec3 barycentricCoord, const glm::vec2 texture[3]) {
+	return (barycentricCoord.x * texture[0]
+		+ barycentricCoord.y * texture[1]
+		+ barycentricCoord.z * texture[2]);
+}
