@@ -140,24 +140,27 @@ void sendImageToPBO(uchar4 *pbo, int w, int h, glm::vec3 *image) {
 * Writes fragment colors to the framebuffer
 */
 __global__
-void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, glm::vec3 lightDir, float lightIntensity) {
+void render(int w, int h, Fragment *fragmentBuffer, glm::vec3 *framebuffer, glm::vec3 lightDir, float lightIntensity, PrimitiveType mode) {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
     int index = x + (y * w);
 
     if (x < w && y < h) {
-        //framebuffer[index] = fragmentBuffer[index].color;
-		//Lambert
-		float lambertTerm = glm::dot(fragmentBuffer[index].eyeNor, lightDir);
-		if (lambertTerm <= 0 ) {
-			lambertTerm = 0.2;
+		if (mode == Line || mode == Point) {
+			framebuffer[index] = fragmentBuffer[index].color;
 		}
-		else if (lambertTerm > 1) {
-			lambertTerm = 1;
+		else {
+			//Lambert
+			float lambertTerm = glm::dot(fragmentBuffer[index].eyeNor, lightDir);
+			if (lambertTerm <= 0) {
+				lambertTerm = 0.2;
+			}
+			else if (lambertTerm > 1) {
+				lambertTerm = 1;
+			}
+			framebuffer[index] = glm::clamp(lambertTerm*lightIntensity*fragmentBuffer[index].color, glm::vec3(0), glm::vec3(1));
+			// TODO: add your fragment shader code here
 		}
-		framebuffer[index] = glm::clamp(lambertTerm*lightIntensity*fragmentBuffer[index].color,glm::vec3(0),glm::vec3(1));
-		// TODO: add your fragment shader code here
-
     }
 }
 
@@ -676,9 +679,9 @@ void _vertexTransformAndAssembly(
 			primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
 		}
 		else {
-			//primitive.dev_verticesOut[vid].col = glm::vec3(0.6);
+			primitive.dev_verticesOut[vid].col = glm::vec3(0.6);
 			//Test for color interpolation
-			if (vid % 3 == 0) {
+			/*if (vid % 3 == 0) {
 				primitive.dev_verticesOut[vid].col = glm::vec3(vid*1.0 / numVertices, 0, 0);
 			}
 			if (vid % 3 == 1) {
@@ -686,7 +689,7 @@ void _vertexTransformAndAssembly(
 			}
 			if (vid % 3 == 2) {
 				primitive.dev_verticesOut[vid].col = glm::vec3(0, 0, vid*1.0 / numVertices);
-			}
+			}*/
 		}	
 	}
 }
@@ -719,67 +722,340 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
-__global__
-void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer,
-							int* dev_depth, int height, int width) {
-	int pid = (blockIdx.x * blockDim.x) + threadIdx.x;
-	if (pid < numOfPrimitives) {
-		//Take out vertices of the triangle
-		glm::vec3 p1 = glm::vec3(dev_primitives[pid].v[0].pos);
-		glm::vec3 p2 = glm::vec3(dev_primitives[pid].v[1].pos);
-		glm::vec3 p3 = glm::vec3(dev_primitives[pid].v[2].pos);
+__device__ 
+int minimum(int a, int b) {
+	return a < b ? a : b;
+}
+
+__device__ 
+int maximum(int a, int b) {
+	return a > b ? a : b;
+}
+
+__device__
+float getZbyLerp(glm::vec2 newPos, glm::vec3 p1, glm::vec3 p2) {
+	float fraction = (newPos.x - p1.x) / (p2.x - p1.x);
+	return (1 - fraction)*p1.z + fraction*p2.z;
+}
+
+__device__
+void rasterizeLine(VertexOut point1, VertexOut point2, Fragment* dev_fragmentBuffer, int* dev_depth, int height, int width) {
+	int x0, y0, x1, y1;
+	float z0, z1;
+	glm::vec3 color0, color1;
+	
+	if (point1.pos.x < point2.pos.x) {
+		x0 = maximum(point1.pos.x, 0);
+		y0 = point1.pos.y;
+		if (y0 < 0) {
+			y0 = 0;
+		}
+		if (y0 > height - 1) {
+			y0 = height - 1;
+		}
+		z0 = point1.pos.z;
+		color0 = point1.col;
+
+		x1 = minimum(point2.pos.x, width - 1);
+		y1 = point2.pos.y;
+		if (y1 < 0) {
+			y1 = 0;
+		}
+		if (y1 > height - 1) {
+			y1 = height - 1;
+		}
+		z1 = point2.pos.z;
+		color1 = point2.col;
 		
+	}
+	else {
+		x0 = maximum(point2.pos.x, 0);
+		y0 = point2.pos.y;
+		if (y0 < 0) {
+			y0 = 0;
+		}
+		if (y0 > height - 1) {
+			y0 = height - 1;
+		}
+		z0 = point2.pos.z;
+		color0 = point2.col;
+		x1 = minimum(point1.pos.x, width - 1);
+		y1 = point1.pos.y;
+		if (y1 < 0) {
+			y1 = 0;
+		}
+		if (y1 > height - 1) {
+			y1 = height - 1;
+		}
+		z1 = point1.pos.z;
+		color1 = point1.col;
+	}
 
-		//Get bounding box for the triangle
-		glm::vec3 triangle[3] = { p1, p2, p3 };
-		AABB bound = getAABBForTriangle(triangle);
-		int rowMin = bound.min.y >= 0 ? bound.min.y : 0;
-		int rowMax = bound.max.y < height ? bound.max.y : height - 1;
-		int colMin = bound.min.x >= 0 ? bound.min.x : 0;
-		int colMax = bound.max.x < width ? bound.max.x : width - 1;
-
-		for (int row = rowMin; row <= rowMax; row++) {
-			for (int col = colMin; col <= colMax; col++) {
-				int fragmentIndex = row*width + col;
-				glm::vec2 fragmentCoord = glm::vec2(col, row);
-				glm::vec3 baryCentricFragment = calculateBarycentricCoordinate(triangle, fragmentCoord);
-				if (isBarycentricCoordInBounds(baryCentricFragment)) {
-					//Apply Texture if available						
-					//Check with depth buffer
-					float fragmentDepth = getZAtCoordinate(baryCentricFragment, triangle);
+	//horizontal Line
+	if (y0 == y1) {
+		for (int x = x0; x <= x1; x++) {
+			float fragmentDepth = (1 - (x - x0)*1.0 / (x1 - x0))*z0 + (x - x0)*1.0 / (x1 - x0)*z1;
+			int mappedIntDepth = fragmentDepth * 100;
+			int fragmentIndex = y0*width + x;
+			int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
+			if (oldDepth > mappedIntDepth) {
+				//dev_fragmentBuffer[fragmentIndex].color = float(1 - (x - x0)*1.0 / (x1 - x0))*color0 + float((x - x0)*1.0 / (x1 - x0))*color1;
+				dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+			}
+		}
+	}else if (x0 == x1) {
+		//verticle Line
+		for (int y = y0; y <= y1; y++) {
+			float fragmentDepth = (1 - (y - y0)*1.0 / (y1 - y0))*z0 + (y - y0)*1.0 / (y1 - y0)*z1;
+			int mappedIntDepth = fragmentDepth * 100;
+			int fragmentIndex = y*width + x0;
+			int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
+			if (oldDepth > mappedIntDepth) {
+				//dev_fragmentBuffer[fragmentIndex].color = float(1 - (y - y0)*1.0 / (y1 - y0))*color0 + float((y - y0)*1.0 / (y1 - y0))*color1;
+				dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+			}
+		}
+	}
+	else {
+		//Calculate line equation
+		float slope = (y1 - y0)*1.0 / (x1 - x0);
+		int increment = y0 < y1 ? 1 : -1;
+		for (int x = x0; x <= x1; x++) {
+			for (int y = y0; y <= y1; y+=increment) {
+				if (fabs(slope*(x - x0) + y0 - y) < 1) {
+					float fragmentDepth = getZbyLerp(glm::vec2(x, y), glm::vec3(x0, y0, z0), glm::vec3(x1, y1, z1));
 					int mappedIntDepth = fragmentDepth * 100;
-					//change to atomic compare
+					int fragmentIndex = y*width + x;
 					int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
 					if (oldDepth > mappedIntDepth) {
-						if (dev_primitives[pid].v[0].dev_diffuseTex != NULL) {
-							glm::vec2 texture[3] = { dev_primitives[pid].v[0].texcoord0,
-									dev_primitives[pid].v[1].texcoord0,
-									dev_primitives[pid].v[2].texcoord0 };
-							glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture);
-							int imageWidth = dev_primitives[pid].v[0].texWidth;
-							int imageHeight = dev_primitives[pid].v[0].texHeight;
-							int textureIndex = ((int)(fragmentTextureCoord.y*imageHeight))*imageWidth + (int)(fragmentTextureCoord.x*imageWidth);
-							float r = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3];
-							float g = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 1];
-							float b = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 2];
-							dev_fragmentBuffer[fragmentIndex].color = glm::vec3(r / 255, g / 255, b / 255);
-						}else {
-							/*glm::vec3 color[3] = { dev_primitives[pid].v[0].col,
-									dev_primitives[pid].v[1].col,
-									dev_primitives[pid].v[2].col };
-							dev_fragmentBuffer[fragmentIndex].color = getColorAtCoordinate(baryCentricFragment, color);	*/
-							//Test Normal
-							dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
-						}
-						dev_fragmentBuffer[fragmentIndex].eyeNor = dev_primitives[pid].v[0].eyeNor;
+						dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
 					}
-										
-					/*******************No Depth Test*****************/
-					//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
-					//dev_fragmentBuffer[fragmentIndex].color = glm::vec3(1.0f);
-					/*******************No Depth Test*****************/
 				}
 			}
+		}
+	}	
+}
+
+__device__
+void bresenhamLine(int x0, int y0, int x1, int y1, Fragment* dev_fragmentBuffer, int width, int height) {
+	//Reference: http://www.geeksforgeeks.org/bresenhams-line-generation-algorithm/
+	/*int m_new = 2 * (y1 - y0);
+	int slope_error_new = m_new - (x1 - x0);
+	for (int x = x0, y = y0; x <= x1; x++)
+	{
+		int fragmentIndex = y*width + x;
+		dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+		// Add slope to increment angle formed
+		slope_error_new += m_new;
+
+		// Slope error reached limit, time to
+		// increment y and update slope error.
+		if (slope_error_new >= 0)
+		{
+			y++;
+			slope_error_new -= 2 * (x1 - x0);
+		}
+	}*/
+
+	//Reference: http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/
+	int w = x1 - x0;
+	int h = y1 - y0;
+	int dx1 = 0, dy1 = 0, dx2 = 0, dy2 = 0;
+	if (w<0) dx1 = -1; else if (w>0) dx1 = 1;
+	if (h<0) dy1 = -1; else if (h>0) dy1 = 1;
+	if (w<0) dx2 = -1; else if (w>0) dx2 = 1;
+	int longest = abs(w);
+	int shortest = abs(h);
+	if (!(longest>shortest)) {
+		longest = abs(h);
+		shortest = abs(w);
+		if (h<0) dy2 = -1; else if (h>0) dy2 = 1;
+		dx2 = 0;
+	}
+	int numerator = longest >> 1;
+	for (int i = 0; i <= longest; i++) {
+		int fragmentIndex = y0*width + x0;
+		dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+		numerator += shortest;
+		if (!(numerator<longest)) {
+			numerator -= longest;
+			x0 += dx1;
+			y0 += dy1;
+		}
+		else {
+			x0 += dx2;
+			y0 += dy2;
+		}
+	}
+}
+
+__device__
+void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragmentBuffer, int* dev_depth, int height, int width) {
+	int x0, y0, x1, y1;
+	float z0, z1;
+	glm::vec3 color0, color1;
+
+	if (point1.pos.x < point2.pos.x) {
+		x0 = maximum(point1.pos.x, 0);
+		y0 = point1.pos.y;
+		if (y0 < 0) {
+			y0 = 0;
+		}
+		if (y0 > height - 1) {
+			y0 = height - 1;
+		}
+		z0 = point1.pos.z;
+		color0 = point1.col;
+
+		x1 = minimum(point2.pos.x, width - 1);
+		y1 = point2.pos.y;
+		if (y1 < 0) {
+			y1 = 0;
+		}
+		if (y1 > height - 1) {
+			y1 = height - 1;
+		}
+		z1 = point2.pos.z;
+		color1 = point2.col;
+
+	}
+	else {
+		x0 = maximum(point2.pos.x, 0);
+		y0 = point2.pos.y;
+		if (y0 < 0) {
+			y0 = 0;
+		}
+		if (y0 > height - 1) {
+			y0 = height - 1;
+		}
+		z0 = point2.pos.z;
+		color0 = point2.col;
+		x1 = minimum(point1.pos.x, width - 1);
+		y1 = point1.pos.y;
+		if (y1 < 0) {
+			y1 = 0;
+		}
+		if (y1 > height - 1) {
+			y1 = height - 1;
+		}
+		z1 = point1.pos.z;
+		color1 = point1.col;
+	}
+
+	//horizontal Line
+	if (y0 == y1) {
+		for (int x = x0; x <= x1; x++) {
+			int fragmentIndex = y0*width + x;
+			dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+		}
+	}
+	else if (x0 == x1) {
+		//verticle Line
+		for (int y = y0; y <= y1; y++) {
+			int fragmentIndex = y*width + x0;
+			dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
+		}
+	}
+	else {
+		bresenhamLine(x0, y0, x1, y1, dev_fragmentBuffer, width, height);
+	}
+}
+
+__global__
+void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragment* dev_fragmentBuffer,
+							int* dev_depth, int height, int width, PrimitiveType mode) {
+	int pid = (blockIdx.x * blockDim.x) + threadIdx.x;
+	if (pid < numOfPrimitives) {
+		if (mode == Triangle) {
+			//Take out vertices of the triangle
+			glm::vec3 p1 = glm::vec3(dev_primitives[pid].v[0].pos);
+			glm::vec3 p2 = glm::vec3(dev_primitives[pid].v[1].pos);
+			glm::vec3 p3 = glm::vec3(dev_primitives[pid].v[2].pos);
+				
+			//********************Rasterize Triangle**********************//
+			//Get bounding box for the triangle
+			glm::vec3 triangle[3] = { p1, p2, p3 };
+			AABB bound = getAABBForTriangle(triangle);
+			int rowMin = bound.min.y >= 0 ? bound.min.y : 0;
+			int rowMax = bound.max.y < height ? bound.max.y : height - 1;
+			int colMin = bound.min.x >= 0 ? bound.min.x : 0;
+			int colMax = bound.max.x < width ? bound.max.x : width - 1;
+
+			for (int row = rowMin; row <= rowMax; row++) {
+				for (int col = colMin; col <= colMax; col++) {
+					int fragmentIndex = row*width + col;
+					glm::vec2 fragmentCoord = glm::vec2(col, row);
+					glm::vec3 baryCentricFragment = calculateBarycentricCoordinate(triangle, fragmentCoord);
+					if (isBarycentricCoordInBounds(baryCentricFragment)) {
+						//Apply Texture if available						
+						//Check with depth buffer
+						float fragmentDepth = getZAtCoordinate(baryCentricFragment, triangle);
+						int mappedIntDepth = fragmentDepth * 100;
+						//change to atomic compare
+						int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
+						if (oldDepth > mappedIntDepth) {
+							if (dev_primitives[pid].v[0].dev_diffuseTex != NULL) {
+								glm::vec2 texture[3] = { dev_primitives[pid].v[0].texcoord0,
+										dev_primitives[pid].v[1].texcoord0,
+										dev_primitives[pid].v[2].texcoord0 };
+								glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture);
+								int imageWidth = dev_primitives[pid].v[0].texWidth;
+								int imageHeight = dev_primitives[pid].v[0].texHeight;
+								int textureIndex = ((int)(fragmentTextureCoord.y*imageHeight))*imageWidth + (int)(fragmentTextureCoord.x*imageWidth);
+								float r = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3];
+								float g = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 1];
+								float b = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 2];
+								dev_fragmentBuffer[fragmentIndex].color = glm::vec3(r / 255, g / 255, b / 255);
+							}
+							else {
+								glm::vec3 color[3] = { dev_primitives[pid].v[0].col,
+										dev_primitives[pid].v[1].col,
+										dev_primitives[pid].v[2].col };
+								dev_fragmentBuffer[fragmentIndex].color = getColorAtCoordinate(baryCentricFragment, color);
+								//Test Normal
+								//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
+							}
+							dev_fragmentBuffer[fragmentIndex].eyeNor = dev_primitives[pid].v[0].eyeNor;
+						}
+
+						/*******************No Depth Test*****************/
+						//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
+						//dev_fragmentBuffer[fragmentIndex].color = glm::vec3(1.0f);
+						/*******************No Depth Test*****************/
+					}
+				}
+			}
+			//********************Rasterize Triangle**********************//
+		}
+		if (mode == Point) {
+			//*******************Rasterize Point***********************//
+			for (int index = 0; index < 3; index++) {
+				glm::vec3 p = glm::vec3(dev_primitives[pid].v[index].pos);				
+				int startRow = floor(p.y) - 1 > 0 ? floor(p.y) - 1 : 0;
+				int endRow = floor(p.y) + 1 < height ? floor(p.y) + 1 : height-1;
+				int startCol = floor(p.x) - 1 > 0 ? floor(p.x) - 1 : 0;
+				int endCol = floor(p.x) + 1 < width ? floor(p.x) + 1 : width-1;
+				float fragmentDepth = p.z;
+				int mappedIntDepth = fragmentDepth * 100;
+				//Color the surrounding fragments
+				for (int x = startCol; x <= endCol; x++) {
+					for (int y = startRow; y <= endRow; y++) {
+						int fragmentIndex = y*width + x;
+						int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
+						if (oldDepth > mappedIntDepth) {
+							dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[index].col;
+						}
+					}
+				}
+			}
+			//*******************Rasterize Point***********************//
+		}
+		if (mode == Line) {
+			//*******************Rasterize Line***********************//
+			rasterizeWireFrame(dev_primitives[pid].v[0], dev_primitives[pid].v[1], dev_fragmentBuffer, dev_depth, height, width);
+			rasterizeWireFrame(dev_primitives[pid].v[0], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth,height, width);
+			rasterizeWireFrame(dev_primitives[pid].v[1], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth, height, width);
+			//*******************Rasterize Line***********************//
 		}
 	}
 }
@@ -839,10 +1115,10 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	//dev_primitives
 	dim3 numBlocksForPrimitives((totalNumPrimitives + 128- 1) / 128);
 	_rasterizePrimitive << <numBlocksForPrimitives, 128 >> > (curPrimitiveBeginId, dev_primitives, dev_fragmentBuffer, 
-		dev_depth, height, width);
+		dev_depth, height, width, Triangle);
 
     // Copy depthbuffer colors into framebuffer
-	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, -sceneLightDir, lightIntensity);
+	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, -sceneLightDir, lightIntensity, Triangle);
 	checkCUDAError("fragment shader");
     // Copy framebuffer into OpenGL buffer for OpenGL previewing
     sendImageToPBO<<<blockCount2d, blockSize2d>>>(pbo, width, height, dev_framebuffer);
