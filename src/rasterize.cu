@@ -114,6 +114,7 @@ static int * dev_depth = NULL;	// you might need this buffer when doing depth te
 static glm::vec3 sceneLightDir = glm::normalize(glm::vec3(0, -1, -1));
 static float lightIntensity = 2.0f;
 
+
 /**
  * Kernel that writes the image to the OpenGL PBO directly.
  */
@@ -1116,7 +1117,6 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	dim3 numBlocksForPrimitives((totalNumPrimitives + 128- 1) / 128);
 	_rasterizePrimitive << <numBlocksForPrimitives, 128 >> > (curPrimitiveBeginId, dev_primitives, dev_fragmentBuffer, 
 		dev_depth, height, width, Triangle);
-
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, -sceneLightDir, lightIntensity, Triangle);
 	checkCUDAError("fragment shader");
