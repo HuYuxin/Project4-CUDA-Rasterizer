@@ -91,6 +91,17 @@ _vertexTransformAndAssembly(......, 0.01)
 
 In general the closer the objects toward camera, the longer it takes to complete rasterize kernal. Because the closer the objects are towards camera, the larger area each triangle will occupy in the screen space. In the rasterize primitive kernal we need to loop over more pixels. The number of triangles does not affect the performance. More triangles (complex engine scaled at 0.01) does not necessary take more time to complete. From the sudden increase of run time between -2 and -1, it is clear that the bottleneck is the occupancy of the triangles on screen. At a very close distance, a few triangle will be rendering on screen, but each of them almost take entire screen space, and we have to loop over all pixels within the bounding box, which severely affects performance.
 
+* Rasterize Pipeline Breakdown
+![Rasterize Pipeline Runtime Breakdown](/renders/PerformancePipelineBreakdown.PNG)
+<p align="center"><b>Rasterize Pipeline Runtime Breakdown</b></p>
+Except Engine which is scaled by 0.01, the rest of objects runtime are measured when camera is at z=-3. The runtime of both boxes and triangles are long because of the slow rasterize process, although they contain much fewer number of primitives. Again it shows that the bottleneck is the loop over large triangles on screenspace. On the contrary, although engine and duck have more primitives, each primitives only occupy a small region on screen, and the loop time in rasterize is shorter. This shows that parallel kernal threads do improve the performance when number of primitives increase, however, the bottleneck comes when some primitive occupies large screen space, and those thread will take long to finish.
+
+![Rasterize Pipeline Runtime Percentage Breakdown](/renders/PerformancePipelinePercentage.PNG)
+<p align="center"><b>Rasterize Pipeline Runtime Percentage Breakdown</b></p>
+As the primitive number increases, the percentage of runtime taken by vertex transformation, primitive assmebly, and render will increase.
+
+
+
 * Rasterize Kernal Run Time Versus Texture Read
 ![Rasterize Kernal Run Time Of Checkerbox](/renders/PerformanceTexture.PNG)
 <p align="center"><b>Rasterize Kernal Run Time Of Checkerbox</b></p>
@@ -100,11 +111,7 @@ It takes twice the time to render checkerbox with texture read.
 * Rasterize Line Methods Comparason
 ![Rasterize Line Methods Comparason](/renders/PerformanceLineRasterize.PNG)
 <p align="center"><b>Rasterize Line Methods Comparason</b></p>
-I used a naive approach to render lines, which is looping through all pixels within the line's bounding box, and check if each pixel falls on the line. I also tested the Bresenham line algorithm, which is the algorithm described in [this post](http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/) The idea is that for line in first octanc, where the slop is between 0 and 1, we increment x every time, and we render either (x+1,y) or (x+1, y+1) based on which pixel is closer to the line. For lines in other octant, we simply convert them to the first octant and repeat the method. This method avoids looping through all pixels, where most of them are not falling on line. From the performance analysis we can observe that the Bresenham line algorithm has almost 4 times performance improvement than naive apprach.
-
-
-
-
+I used a naive approach to render lines, which is looping through all pixels within the line's bounding box, and check if each pixel falls on the line. I also tested the Bresenham line algorithm, which is the algorithm described in[this post](http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/) The idea is that for line in first octanc, where the slop is between 0 and 1, we increment x every time, and we render either (x+1,y) or (x+1, y+1) based on which pixel is closer to the line. For lines in other octant, we simply convert them to the first octant and repeat the method. This method avoids looping through all pixels, where most of them are not falling on line. From the performance analysis we can observe that the Bresenham line algorithm has almost 4 times performance improvement than naive apprach.
 
 
 ### Credits
