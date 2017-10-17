@@ -10,18 +10,18 @@ CUDA Rasterizer
 
 ### Yuxin Hu
 ## Code Change
-* rasterize.cu. Add a new function parameters in function _vertexTransformAndAssembly: float scale. For objects that are too large to be displayed properly on screen, I will pass a scale parameters to resize it in model space.
-* rasterize.cu. Add a kernal function _rasterizePrimitive to set value for fragment buffer. It has three modes: triangle, point and line.
-* rasterize.cu. Add three function parameters in render() function. glm::vec3 lightDir & float lightIntensity: for light direction and light intensity that will be used for Lambert shading models. PrimitiveType mode: if it is point or line, do not apply shading model, if it is triangle, apply lambert shading model.
-* rasterize.cu. Add a new function float getZByLerp, get depth of fragment on a line between two vertice.
-* rasterize.cu. Add a new function rasterizeLine. A naive approach to loop through all pixels within line's bounding box, and check if each pixel falls on the line segment.
-* rasterize.cu. Add a new function bresenhamLine. This is third party code taken reference from  http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/. It uses the Bresenhan Line Algorithm to shade fragments that form the line between two vertices.
-* rasterize.cu. Add a new function rasterizeWireFrame. This will be called as a parent function of bresenhamLine.
-* rasterize.h. Add the performance timer class PerformanceTimer, adapted from WindyDarian(https://github.com/WindyDarian).
-* rasterizeTools.h. Add a new function getAABBForLine. Get the bounding box of the line segment.
-* rasterizeTools.h. Add a new function getColorAtCoordinate. Get the color of the fragment using barycentric interpolation, without perspective correction.
-* rasterizeTools.h. Add a new function getEyeSpaceZAtCoordinate. Get the eye space z at coordinate using barycentric interpolation.
-* rasterizeTools.h. Add a new function getTextureAtCoord. Get the perspective corrected texture uv coordinate using barycentric interpolation.
+* rasterize.cu. Add a new function parameters in function _vertexTransformAndAssembly: float **scale**. For objects that are too large to be displayed properly on screen, I will pass a scale parameters to resize it in model space.
+* rasterize.cu. Add a kernal function **_rasterizePrimitive** to set value for fragment buffer. It has three modes: triangle, point and line.
+* rasterize.cu. Add three function parameters in render() function. **glm::vec3 lightDir** & **float lightIntensity**: for light direction and light intensity that will be used for Lambert shading models. **PrimitiveType mode**: if it is point or line, do not apply shading model, if it is triangle, apply lambert shading model.
+* rasterize.cu. Add a new function **getZByLerp**, get depth of fragment on a line between two vertice.
+* rasterize.cu. Add a new function **rasterizeLine**. A naive approach to loop through all pixels within line's bounding box, and check if each pixel falls on the line segment.
+* rasterize.cu. Add a new function **bresenhamLine**. This is third party code taken reference from  http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/. It uses the Bresenhan Line Algorithm to shade fragments that form the line between two vertices.
+* rasterize.cu. Add a new function **rasterizeWireFrame**. This will be called as a parent function of bresenhamLine.
+* rasterize.h. Add the performance timer class **PerformanceTimer**, adapted from WindyDarian(https://github.com/WindyDarian).
+* rasterizeTools.h. Add a new function **getAABBForLine**. Get the bounding box of the line segment.
+* rasterizeTools.h. Add a new function **getColorAtCoordinate**. Get the color of the fragment using barycentric interpolation, without perspective correction.
+* rasterizeTools.h. Add a new function **getEyeSpaceZAtCoordinate**. Get the eye space z at coordinate using barycentric interpolation.
+* rasterizeTools.h. Add a new function **getTextureAtCoord**. Get the perspective corrected texture uv coordinate using barycentric interpolation.
 
 ## How to run different rasterize mode?
 * Render primitives with lambert shading model: change the last parameter of below two kernal function calls in rasterize() to **Triangle**
@@ -100,7 +100,7 @@ It takes twice the time to render checkerbox with texture read.
 * Rasterize Line Methods Comparason
 ![Rasterize Line Methods Comparason](/renders/PerformanceLineRasterize.PNG)
 <p align="center"><b>Rasterize Line Methods Comparason</b></p>
-I used a naive approach to render lines, which is looping through all pixels within the line's bounding box, and check if each pixel falls on the line. I also tested the Bresenham line algorithm, which is the algorithm described in [this post](http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/).  The idea is that for line in first octanc, where the slop is between 0 and 1, we increment x every time, and we render either (x+1,y) or (x+1, y+1) based on which pixel is closer to the line. For lines in other octant, we simply convert them to the first octant and repeat the method. This method avoids looping through all pixels, where most of them are not falling on line. From the performance analysis we can observe that the Bresenham line algorithm has almost 4 times performance improvement than naive apprach.
+I used a naive approach to render lines, which is looping through all pixels within the line's bounding box, and check if each pixel falls on the line. I also tested the Bresenham line algorithm, which is the algorithm described in [this post](http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/) The idea is that for line in first octanc, where the slop is between 0 and 1, we increment x every time, and we render either (x+1,y) or (x+1, y+1) based on which pixel is closer to the line. For lines in other octant, we simply convert them to the first octant and repeat the method. This method avoids looping through all pixels, where most of them are not falling on line. From the performance analysis we can observe that the Bresenham line algorithm has almost 4 times performance improvement than naive apprach.
 
 
 
