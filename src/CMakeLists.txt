@@ -2,7 +2,6 @@ set(SOURCE_FILES
     "rasterize.cu"
     "rasterize.h"
     "rasterizeTools.h"
-    "performance.h"
     )
 
 cuda_add_library(src

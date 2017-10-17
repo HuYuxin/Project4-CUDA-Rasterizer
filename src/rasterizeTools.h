@@ -43,6 +43,20 @@ AABB getAABBForTriangle(const glm::vec3 tri[3]) {
     return aabb;
 }
 
+__host__ __device__ static
+AABB getAABBForLine(const glm::vec3 line[2]) {
+	AABB aabb;
+	aabb.min = glm::vec3(
+		min(line[0].x, line[1].x),
+		min(line[0].y, line[1].y),
+		min(line[0].z, line[1].z));
+	aabb.max = glm::vec3(
+		max(line[0].x, line[1].x),
+		max(line[0].y, line[1].y),
+		max(line[0].z, line[1].z));
+	return aabb;
+}
+
 // CHECKITOUT
 /**
  * Calculate the signed area of a given triangle.
@@ -108,8 +122,15 @@ glm::vec3 getColorAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3
 }
 
 __host__ __device__ static
-glm::vec2 getTextureAtCoord(const glm::vec3 barycentricCoord, const glm::vec2 texture[3]) {
-	return (barycentricCoord.x * texture[0]
-		+ barycentricCoord.y * texture[1]
-		+ barycentricCoord.z * texture[2]);
+float getEyeSpaceZAtCoordinate(const glm::vec3 barycentricCoord, const glm::vec3 tri[3]) {
+	return 1.0f/(barycentricCoord.x /tri[0].z
+		+ barycentricCoord.y /tri[1].z
+		+ barycentricCoord.z /tri[2].z);
+}
+
+__host__ __device__ static
+glm::vec2 getTextureAtCoord(const glm::vec3 barycentricCoord, const glm::vec2 texture[3], const float depths[3], const float zdepth) {
+	return (barycentricCoord.x * texture[0] * zdepth*1.0f / depths[0]
+		+ barycentricCoord.y * texture[1] * zdepth*1.0f / depths[1]
+		+ barycentricCoord.z * texture[2] * (zdepth*1.0f / depths[2]));
 }

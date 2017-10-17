@@ -15,6 +15,12 @@
 
 class PerformanceTimer
 {
+	/**
+	* This class is used for timing the performance
+	* Uncopyable and unmovable
+	*
+	* Adapted from WindyDarian(https://github.com/WindyDarian)
+	*/
 public:
 	PerformanceTimer()
 	{

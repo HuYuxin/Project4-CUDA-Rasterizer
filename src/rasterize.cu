@@ -687,6 +687,7 @@ void _vertexTransformAndAssembly(
 			primitive.dev_verticesOut[vid].texcoord0 = primitive.dev_texcoord0[vid];
 			primitive.dev_verticesOut[vid].texWidth = primitive.diffuseTexWidth;
 			primitive.dev_verticesOut[vid].texHeight = primitive.diffuseTexHeight;
+			primitive.dev_verticesOut[vid].col = glm::vec3(0.6);
 		}
 		else {
 			primitive.dev_verticesOut[vid].col = glm::vec3(0.6);
@@ -732,16 +733,6 @@ void _primitiveAssembly(int numIndices, int curPrimitiveBeginId, Primitive* dev_
 	
 }
 
-__device__ 
-int minimum(int a, int b) {
-	return a < b ? a : b;
-}
-
-__device__ 
-int maximum(int a, int b) {
-	return a > b ? a : b;
-}
-
 __device__
 float getZbyLerp(glm::vec2 newPos, glm::vec3 p1, glm::vec3 p2) {
 	float fraction = (newPos.x - p1.x) / (p2.x - p1.x);
@@ -750,90 +741,22 @@ float getZbyLerp(glm::vec2 newPos, glm::vec3 p1, glm::vec3 p2) {
 
 __device__
 void rasterizeLine(VertexOut point1, VertexOut point2, Fragment* dev_fragmentBuffer, int* dev_depth, int height, int width) {
-	int x0, y0, x1, y1;
-	float z0, z1;
-	glm::vec3 color0, color1;
-	
-	if (point1.pos.x < point2.pos.x) {
-		x0 = maximum(point1.pos.x, 0);
-		y0 = point1.pos.y;
-		if (y0 < 0) {
-			y0 = 0;
-		}
-		if (y0 > height - 1) {
-			y0 = height - 1;
-		}
-		z0 = point1.pos.z;
-		color0 = point1.col;
-
-		x1 = minimum(point2.pos.x, width - 1);
-		y1 = point2.pos.y;
-		if (y1 < 0) {
-			y1 = 0;
-		}
-		if (y1 > height - 1) {
-			y1 = height - 1;
-		}
-		z1 = point2.pos.z;
-		color1 = point2.col;
-		
+	glm::vec3 line[2] = { glm::vec3(point1.pos) , glm::vec3(point2.pos) };
+	AABB boundBox = getAABBForLine(line);
+	if (boundBox.min.x > width - 1 || boundBox.min.y > height - 1 || boundBox.max.x < 0 || boundBox.max.y < 0) {
+		return;
 	}
 	else {
-		x0 = maximum(point2.pos.x, 0);
-		y0 = point2.pos.y;
-		if (y0 < 0) {
-			y0 = 0;
-		}
-		if (y0 > height - 1) {
-			y0 = height - 1;
-		}
-		z0 = point2.pos.z;
-		color0 = point2.col;
-		x1 = minimum(point1.pos.x, width - 1);
-		y1 = point1.pos.y;
-		if (y1 < 0) {
-			y1 = 0;
-		}
-		if (y1 > height - 1) {
-			y1 = height - 1;
-		}
-		z1 = point1.pos.z;
-		color1 = point1.col;
-	}
+		boundBox.min.x = boundBox.min.x >= 0 ? boundBox.min.x : 0;
+		boundBox.max.x = boundBox.max.x < width ? boundBox.max.x : width-1;
+		boundBox.min.y = boundBox.min.y >= 0 ? boundBox.min.y : 0;
+		boundBox.max.y = boundBox.max.y < height ? boundBox.max.y : height-1;
 
-	//horizontal Line
-	if (y0 == y1) {
-		for (int x = x0; x <= x1; x++) {
-			float fragmentDepth = (1 - (x - x0)*1.0 / (x1 - x0))*z0 + (x - x0)*1.0 / (x1 - x0)*z1;
-			int mappedIntDepth = fragmentDepth * 100;
-			int fragmentIndex = y0*width + x;
-			int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
-			if (oldDepth > mappedIntDepth) {
-				//dev_fragmentBuffer[fragmentIndex].color = float(1 - (x - x0)*1.0 / (x1 - x0))*color0 + float((x - x0)*1.0 / (x1 - x0))*color1;
-				dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
-			}
-		}
-	}else if (x0 == x1) {
-		//verticle Line
-		for (int y = y0; y <= y1; y++) {
-			float fragmentDepth = (1 - (y - y0)*1.0 / (y1 - y0))*z0 + (y - y0)*1.0 / (y1 - y0)*z1;
-			int mappedIntDepth = fragmentDepth * 100;
-			int fragmentIndex = y*width + x0;
-			int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
-			if (oldDepth > mappedIntDepth) {
-				//dev_fragmentBuffer[fragmentIndex].color = float(1 - (y - y0)*1.0 / (y1 - y0))*color0 + float((y - y0)*1.0 / (y1 - y0))*color1;
-				dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
-			}
-		}
-	}
-	else {
-		//Calculate line equation
-		float slope = (y1 - y0)*1.0 / (x1 - x0);
-		int increment = y0 < y1 ? 1 : -1;
-		for (int x = x0; x <= x1; x++) {
-			for (int y = y0; y <= y1; y+=increment) {
-				if (fabs(slope*(x - x0) + y0 - y) < 1) {
-					float fragmentDepth = getZbyLerp(glm::vec2(x, y), glm::vec3(x0, y0, z0), glm::vec3(x1, y1, z1));
+		for (int x = boundBox.min.x; x <= boundBox.max.x; x++) {
+			for (int y = boundBox.min.y; y <= boundBox.max.y; y ++) {
+				if (fabs(glm::dot(glm::normalize(glm::vec3(x - point1.pos.x, y - point1.pos.y, 0)), 
+					glm::normalize(glm::vec3(point2.pos.x - x, point2.pos.y - y, 0)))- 1) <0.005) {
+					float fragmentDepth = getZbyLerp(glm::vec2(x, y), glm::vec3(point1.pos), glm::vec3(point2.pos));
 					int mappedIntDepth = fragmentDepth * 100;
 					int fragmentIndex = y*width + x;
 					int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
@@ -843,30 +766,21 @@ void rasterizeLine(VertexOut point1, VertexOut point2, Fragment* dev_fragmentBuf
 				}
 			}
 		}
-	}	
+	}
+}
+
+__device__
+int minimum(int a, int b) {
+	return a < b ? a : b;
+}
+
+__device__
+int maximum(int a, int b) {
+	return a > b ? a : b;
 }
 
 __device__
 void bresenhamLine(int x0, int y0, int x1, int y1, Fragment* dev_fragmentBuffer, int width, int height) {
-	//Reference: http://www.geeksforgeeks.org/bresenhams-line-generation-algorithm/
-	/*int m_new = 2 * (y1 - y0);
-	int slope_error_new = m_new - (x1 - x0);
-	for (int x = x0, y = y0; x <= x1; x++)
-	{
-		int fragmentIndex = y*width + x;
-		dev_fragmentBuffer[fragmentIndex].color = glm::vec3(0.6);
-		// Add slope to increment angle formed
-		slope_error_new += m_new;
-
-		// Slope error reached limit, time to
-		// increment y and update slope error.
-		if (slope_error_new >= 0)
-		{
-			y++;
-			slope_error_new -= 2 * (x1 - x0);
-		}
-	}*/
-
 	//Reference: http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/
 	int w = x1 - x0;
 	int h = y1 - y0;
@@ -984,7 +898,7 @@ void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragmen
 				
 			//********************Rasterize Triangle**********************//
 			//Get bounding box for the triangle
-			glm::vec3 triangle[3] = { p1, p2, p3 };
+			glm::vec3 triangle[3] = { p1,p2,p3};
 			AABB bound = getAABBForTriangle(triangle);
 			bool outofscreen = false;
 			if (bound.max.y < 0 || bound.min.y>height - 1 || bound.max.x<0 || bound.min.x>width - 1) {
@@ -1014,7 +928,9 @@ void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragmen
 									glm::vec2 texture[3] = { dev_primitives[pid].v[0].texcoord0,
 										dev_primitives[pid].v[1].texcoord0,
 										dev_primitives[pid].v[2].texcoord0 };
-									glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture);
+									float depths[3] = { p1.z,p2.z,p3.z};
+									float fragmentDepthEyeSpace = getEyeSpaceZAtCoordinate(baryCentricFragment, triangle);
+									glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture, depths, fragmentDepthEyeSpace);
 									int imageWidth = dev_primitives[pid].v[0].texWidth;
 									int imageHeight = dev_primitives[pid].v[0].texHeight;
 									int textureIndex = ((int)(fragmentTextureCoord.y*imageHeight))*imageWidth + (int)(fragmentTextureCoord.x*imageWidth);
@@ -1069,9 +985,15 @@ void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragmen
 		}
 		if (mode == Line) {
 			//*******************Rasterize Line***********************//
+			//**** rasterizeWireFrame uses Bresenham algorithm, third party code****//
 			rasterizeWireFrame(dev_primitives[pid].v[0], dev_primitives[pid].v[1], dev_fragmentBuffer, dev_depth, height, width);
 			rasterizeWireFrame(dev_primitives[pid].v[0], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth,height, width);
 			rasterizeWireFrame(dev_primitives[pid].v[1], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth, height, width);
+
+			//**** rasterizeLine uses naive approach, looping through all pixels within line bounding box****//
+			//rasterizeLine(dev_primitives[pid].v[0], dev_primitives[pid].v[1], dev_fragmentBuffer, dev_depth, height, width);
+			//rasterizeLine(dev_primitives[pid].v[0], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth, height, width);
+			//rasterizeLine(dev_primitives[pid].v[1], dev_primitives[pid].v[2], dev_fragmentBuffer, dev_depth, height, width);
 			//*******************Rasterize Line***********************//
 		}
 	}
@@ -1108,7 +1030,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height, 0.01);
+				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height, 1);
 				checkCUDAError("Vertex Processing");
 				cudaDeviceSynchronize();
 				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
