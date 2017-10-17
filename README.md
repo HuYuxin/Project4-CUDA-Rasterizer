@@ -43,8 +43,28 @@ CUDA Rasterizer
   
 ![Cesium Milk Truck with Texture](/renders/CeciumMilkTruck.gif)
 <p align="center"><b>Cesium Milk Truck with Texture</b></p>
+
+## Point
+![Box rendered with points](/renders/PointBox.gif)
+<p align="center"><b>Box rendered with points only</b></p>
+
+![Cow rendered with points](/renders/PointCow.gif)
+<p align="center"><b>Cow rendered with points</b></p>
+
+## Line
+* Third party code reference: http://tech-algorithm.com/articles/drawing-line-using-bresenham-algorithm/
+![Cow rendered with Lines](/renders/LineCow.gif)
+<p align="center"><b>Cow rendered with lines</b></p>
+
+
   
 ## Performance Analysis
+* Rasterize Kernal Run Time Versus Depth of Object along Camera Z
+![Rasterize Kernal Run Time Versus Depth of Object](/renders/PerformanceDepth.PNG)
+<p align="center"><b>Rasterize Kernal Run Time Versus Depth of Object</b></p>
+
+In general the closer the objects toward camera, the longer it takes to complete rasterize kernal. Because the closer the objects are towards camera, the larger area each triangle will occupy in the screen space. In the rasterize primitive kernal we need to loop over more pixels. The number of triangles does not affect the performance. More triangles (complex engine scaled at 0.01) does not necessary take more time to complete. From the sudden increase of run time between -2 and -1, it is clear that the bottleneck is the occupancy of the triangles on screen. At a very close distance, a few triangle will be rendering on screen, but each of them almost take entire screen space, and we have to loop over all pixels within the bounding box, which severely affects performance.
+
 
 ### Credits
 

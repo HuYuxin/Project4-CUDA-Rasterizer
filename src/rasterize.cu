@@ -17,6 +17,7 @@
 #include "rasterize.h"
 #include <glm/gtc/quaternion.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 namespace {
 
@@ -97,6 +98,14 @@ namespace {
 	};
 
 }
+
+//***************Performance Analysis Timer******************//
+PerformanceTimer& timer()
+{
+	static PerformanceTimer timer;
+	return timer;
+}
+//***************Performance Analysis Timer******************//
 
 static std::map<std::string, std::vector<PrimitiveDevBufPointers>> mesh2PrimitivesMap;
 
@@ -893,7 +902,7 @@ void bresenhamLine(int x0, int y0, int x1, int y1, Fragment* dev_fragmentBuffer,
 __device__
 void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragmentBuffer, int* dev_depth, int height, int width) {
 	int x0, y0, x1, y1;
-	float z0, z1;
+	//float z0, z1;
 	glm::vec3 color0, color1;
 
 	if (point1.pos.x < point2.pos.x) {
@@ -905,7 +914,7 @@ void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragme
 		if (y0 > height - 1) {
 			y0 = height - 1;
 		}
-		z0 = point1.pos.z;
+		//z0 = point1.pos.z;
 		color0 = point1.col;
 
 		x1 = minimum(point2.pos.x, width - 1);
@@ -916,7 +925,7 @@ void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragme
 		if (y1 > height - 1) {
 			y1 = height - 1;
 		}
-		z1 = point2.pos.z;
+		//z1 = point2.pos.z;
 		color1 = point2.col;
 
 	}
@@ -929,7 +938,7 @@ void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragme
 		if (y0 > height - 1) {
 			y0 = height - 1;
 		}
-		z0 = point2.pos.z;
+		//z0 = point2.pos.z;
 		color0 = point2.col;
 		x1 = minimum(point1.pos.x, width - 1);
 		y1 = point1.pos.y;
@@ -939,7 +948,7 @@ void rasterizeWireFrame(VertexOut point1, VertexOut point2, Fragment* dev_fragme
 		if (y1 > height - 1) {
 			y1 = height - 1;
 		}
-		z1 = point1.pos.z;
+		//z1 = point1.pos.z;
 		color1 = point1.col;
 	}
 
@@ -977,55 +986,62 @@ void _rasterizePrimitive(int numOfPrimitives, Primitive* dev_primitives, Fragmen
 			//Get bounding box for the triangle
 			glm::vec3 triangle[3] = { p1, p2, p3 };
 			AABB bound = getAABBForTriangle(triangle);
-			int rowMin = bound.min.y >= 0 ? bound.min.y : 0;
-			int rowMax = bound.max.y < height ? bound.max.y : height - 1;
-			int colMin = bound.min.x >= 0 ? bound.min.x : 0;
-			int colMax = bound.max.x < width ? bound.max.x : width - 1;
+			bool outofscreen = false;
+			if (bound.max.y < 0 || bound.min.y>height - 1 || bound.max.x<0 || bound.min.x>width - 1) {
+				//primitive out of screen no need to rasterize;
+				outofscreen = true;
+			}
+			if (!outofscreen) {
+				int rowMin = bound.min.y >= 0 ? bound.min.y : 0;
+				int rowMax = bound.max.y < height ? bound.max.y : height - 1;
+				int colMin = bound.min.x >= 0 ? bound.min.x : 0;
+				int colMax = bound.max.x < width ? bound.max.x : width - 1;
 
-			for (int row = rowMin; row <= rowMax; row++) {
-				for (int col = colMin; col <= colMax; col++) {
-					int fragmentIndex = row*width + col;
-					glm::vec2 fragmentCoord = glm::vec2(col, row);
-					glm::vec3 baryCentricFragment = calculateBarycentricCoordinate(triangle, fragmentCoord);
-					if (isBarycentricCoordInBounds(baryCentricFragment)) {
-						//Apply Texture if available						
-						//Check with depth buffer
-						float fragmentDepth = getZAtCoordinate(baryCentricFragment, triangle);
-						int mappedIntDepth = fragmentDepth * 100;
-						//change to atomic compare
-						int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
-						if (oldDepth > mappedIntDepth) {
-							if (dev_primitives[pid].v[0].dev_diffuseTex != NULL) {
-								glm::vec2 texture[3] = { dev_primitives[pid].v[0].texcoord0,
+				for (int row = rowMin; row <= rowMax; row++) {
+					for (int col = colMin; col <= colMax; col++) {
+						int fragmentIndex = row*width + col;
+						glm::vec2 fragmentCoord = glm::vec2(col, row);
+						glm::vec3 baryCentricFragment = calculateBarycentricCoordinate(triangle, fragmentCoord);
+						if (isBarycentricCoordInBounds(baryCentricFragment)) {
+							//Apply Texture if available						
+							//Check with depth buffer
+							float fragmentDepth = getZAtCoordinate(baryCentricFragment, triangle);
+							int mappedIntDepth = fragmentDepth * 100;
+							//change to atomic compare
+							int oldDepth = atomicMin(&dev_depth[fragmentIndex], mappedIntDepth);
+							if (oldDepth > mappedIntDepth) {
+								if (dev_primitives[pid].v[0].dev_diffuseTex != NULL) {
+									glm::vec2 texture[3] = { dev_primitives[pid].v[0].texcoord0,
 										dev_primitives[pid].v[1].texcoord0,
 										dev_primitives[pid].v[2].texcoord0 };
-								glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture);
-								int imageWidth = dev_primitives[pid].v[0].texWidth;
-								int imageHeight = dev_primitives[pid].v[0].texHeight;
-								int textureIndex = ((int)(fragmentTextureCoord.y*imageHeight))*imageWidth + (int)(fragmentTextureCoord.x*imageWidth);
-								float r = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3];
-								float g = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 1];
-								float b = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 2];
-								dev_fragmentBuffer[fragmentIndex].color = glm::vec3(r / 255, g / 255, b / 255);
-							}
-							else {
-								glm::vec3 color[3] = { dev_primitives[pid].v[0].col,
+									glm::vec2 fragmentTextureCoord = getTextureAtCoord(baryCentricFragment, texture);
+									int imageWidth = dev_primitives[pid].v[0].texWidth;
+									int imageHeight = dev_primitives[pid].v[0].texHeight;
+									int textureIndex = ((int)(fragmentTextureCoord.y*imageHeight))*imageWidth + (int)(fragmentTextureCoord.x*imageWidth);
+									float r = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3];
+									float g = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 1];
+									float b = dev_primitives[pid].v[0].dev_diffuseTex[textureIndex * 3 + 2];
+									dev_fragmentBuffer[fragmentIndex].color = glm::vec3(r / 255, g / 255, b / 255);
+								}
+								else {
+									glm::vec3 color[3] = { dev_primitives[pid].v[0].col,
 										dev_primitives[pid].v[1].col,
 										dev_primitives[pid].v[2].col };
-								dev_fragmentBuffer[fragmentIndex].color = getColorAtCoordinate(baryCentricFragment, color);
-								//Test Normal
-								//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
+									dev_fragmentBuffer[fragmentIndex].color = getColorAtCoordinate(baryCentricFragment, color);
+									//Test Normal
+									//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
+								}
+								dev_fragmentBuffer[fragmentIndex].eyeNor = dev_primitives[pid].v[0].eyeNor;
 							}
-							dev_fragmentBuffer[fragmentIndex].eyeNor = dev_primitives[pid].v[0].eyeNor;
-						}
 
-						/*******************No Depth Test*****************/
-						//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
-						//dev_fragmentBuffer[fragmentIndex].color = glm::vec3(1.0f);
-						/*******************No Depth Test*****************/
+							/*******************No Depth Test*****************/
+							//dev_fragmentBuffer[fragmentIndex].color = dev_primitives[pid].v[0].eyeNor;
+							//dev_fragmentBuffer[fragmentIndex].color = glm::vec3(1.0f);
+							/*******************No Depth Test*****************/
+						}
 					}
 				}
-			}
+			}			
 			//********************Rasterize Triangle**********************//
 		}
 		if (mode == Point) {
@@ -1092,7 +1108,7 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 				dim3 numBlocksForVertices((p->numVertices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 				dim3 numBlocksForIndices((p->numIndices + numThreadsPerBlock.x - 1) / numThreadsPerBlock.x);
 
-				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height, 1);
+				_vertexTransformAndAssembly << < numBlocksForVertices, numThreadsPerBlock >> >(p->numVertices, *p, MVP, MV, MV_normal, width, height, 0.01);
 				checkCUDAError("Vertex Processing");
 				cudaDeviceSynchronize();
 				_primitiveAssembly << < numBlocksForIndices, numThreadsPerBlock >> >
@@ -1115,8 +1131,12 @@ void rasterize(uchar4 *pbo, const glm::mat4 & MVP, const glm::mat4 & MV, const g
 	// TODO: rasterize
 	//dev_primitives
 	dim3 numBlocksForPrimitives((totalNumPrimitives + 128- 1) / 128);
+
+	timer().startGpuTimer();
 	_rasterizePrimitive << <numBlocksForPrimitives, 128 >> > (curPrimitiveBeginId, dev_primitives, dev_fragmentBuffer, 
 		dev_depth, height, width, Triangle);
+	timer().endGpuTimer();
+
     // Copy depthbuffer colors into framebuffer
 	render << <blockCount2d, blockSize2d >> >(width, height, dev_fragmentBuffer, dev_framebuffer, -sceneLightDir, lightIntensity, Triangle);
 	checkCUDAError("fragment shader");
